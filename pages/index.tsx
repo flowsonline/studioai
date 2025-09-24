@@ -1,53 +1,65 @@
 // pages/index.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-/**
- * Orion Studio — MVP UI
- * Button 1: Generate (Simulated/Real) → POST /api/render → returns previewUrl
- * Button 2: Generate Copy (OpenAI) → POST /api/generate-copy → returns script/caption/hashtags
- */
+type RenderStatus = {
+  status?: "queued" | "processing" | "succeeded" | "failed" | string;
+  progress?: number;
+  url?: string | null;
+};
 
-const tones = [
-  "Cinematic",
-  "Bold",
-  "Energetic",
-  "Friendly",
-  "Elegant",
-  "Professional",
-] as const;
-
+const tones = ["Cinematic", "Bold", "Energetic", "Friendly", "Elegant", "Professional"] as const;
 const formats = ["Reel (9:16)", "Story (9:16)", "Square (1:1)", "Wide (16:9)"] as const;
 
 export default function Home() {
-  // Basic inputs
+  // basic inputs
   const [desc, setDesc] = useState("");
   const [tone, setTone] = useState<(typeof tones)[number]>("Cinematic");
   const [format, setFormat] = useState<(typeof formats)[number]>("Reel (9:16)");
 
-  // Render state
+  // status / result
   const [loading, setLoading] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Copy state
+  // copy results (OpenAI)
   const [copyLoading, setCopyLoading] = useState(false);
-  const [script, setScript] = useState("");
-  const [caption, setCaption] = useState("");
-  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [copyJson, setCopyJson] = useState<any | null>(null);
 
+  // eden render (async job)
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [renderStatus, setRenderStatus] = useState<RenderStatus | null>(null);
+
+  // ----- POLLING: Eden job status -----
+  useEffect(() => {
+    if (!jobId) return;
+    const iv = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/status?jobId=${encodeURIComponent(jobId)}`);
+        const j = await r.json();
+        setRenderStatus(j);
+        if (j.status === "succeeded" || j.status === "failed") clearInterval(iv);
+      } catch (e: any) {
+        // stop polling if we get an error
+        clearInterval(iv);
+        setError(e?.message || "Status polling failed");
+      }
+    }, 900);
+    return () => clearInterval(iv);
+  }, [jobId]);
+
+  // ----- Generate video (Eden async or simulator via env flag) -----
   async function handleGenerate() {
-    setLoading(true);
     setError(null);
-    setResultUrl(null);
-
+    setRenderStatus(null);
+    setJobId(null);
+    setLoading(true);
     try {
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: desc,
-          tone,
-          format,
+          provider: "pika", // or "pikalabs", depends on your Eden plan
+          // you can include tone/format here if you want to guide the prompt
         }),
       });
 
@@ -57,7 +69,14 @@ export default function Home() {
       }
 
       const data = await res.json();
-      setResultUrl(data.previewUrl || null);
+      // If Eden returns a job, we poll. If simulator (or direct url) returns previewUrl, show it immediately.
+      if (data.jobId) {
+        setJobId(String(data.jobId));
+      } else if (data.previewUrl) {
+        setRenderStatus({ status: "succeeded", url: data.previewUrl });
+      } else {
+        setError("Eden did not return a jobId or URL.");
+      }
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
     } finally {
@@ -65,26 +84,27 @@ export default function Home() {
     }
   }
 
+  // ----- Generate Copy (OpenAI) -----
   async function handleGenerateCopy() {
-    setCopyLoading(true);
     setError(null);
-
+    setCopyJson(null);
+    setCopyLoading(true);
     try {
       const res = await fetch("/api/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: desc }),
       });
+
       if (!res.ok) {
         const msg = await res.text();
-        throw new Error(msg || `Copy generation failed (${res.status})`);
+        throw new Error(msg || `Copy failed (${res.status})`);
       }
+
       const data = await res.json();
-      setScript(data.script || "");
-      setCaption(data.caption || "");
-      setHashtags(data.hashtags || []);
+      setCopyJson(data); // we expect { script, caption, hashtags } from your API
     } catch (e: any) {
-      setError(e?.message || "Copy failed");
+      setError(e?.message || "Copy generation failed");
     } finally {
       setCopyLoading(false);
     }
@@ -96,11 +116,13 @@ export default function Home() {
         <div style={styles.title}>
           Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.
         </div>
-        <div style={styles.sub}>Tell me what you’re posting today and I’ll mock up your ad.</div>
+        <div style={styles.sub}>
+          Tell me what you’re posting today and I’ll mock up your ad. (Real video uses Eden async jobs with polling.)
+        </div>
 
         <label style={styles.label}>Post description</label>
         <textarea
-          placeholder="e.g., 15s ad for a new coffee shop launch, upbeat and friendly."
+          placeholder="e.g., 15s ad for a coffee shop launch by the beach, upbeat and friendly."
           style={styles.textarea}
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
@@ -129,49 +151,64 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Buttons */}
         <button
           onClick={handleGenerate}
           style={styles.button}
           disabled={loading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate"}
+          title={!desc.trim() ? "Add a short description first" : "Generate with Eden (or simulator based on env)"}
         >
-          {loading ? "Generating…" : "Generate (Simulated)"}
+          {loading ? "Generating…" : "Generate (Simulated / Eden)"}
         </button>
 
         <button
           onClick={handleGenerateCopy}
           style={styles.button}
           disabled={copyLoading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate Copy (AI)"}
+          title={!desc.trim() ? "Add a short description first" : "Generate AI copy (OpenAI)"}
         >
           {copyLoading ? "Generating Copy…" : "Generate Copy (AI)"}
         </button>
 
-        {error && <div style={styles.error}>⚠️ {JSON.stringify(error)}</div>}
-
-        {resultUrl && (
-          <div style={styles.resultBox}>
-            <div style={styles.resultTitle}>Preview</div>
-            <div style={styles.resultHint}>Your generated asset link:</div>
-            <a href={resultUrl} style={styles.link} target="_blank" rel="noreferrer">
-              {resultUrl}
-            </a>
+        {/* Error box */}
+        {error && (
+          <div style={styles.error}>
+            ⚠️ <code>{JSON.stringify({ error })}</code>
           </div>
         )}
 
-        {(script || caption || hashtags.length > 0) && (
+        {/* Render status / link */}
+        {renderStatus && (
+          <div style={styles.resultBox}>
+            <div style={styles.resultTitle}>Render Status</div>
+            <div style={styles.resultHint}>
+              {renderStatus.status} {renderStatus.progress != null ? `— ${renderStatus.progress}%` : ""}
+            </div>
+            {renderStatus.url && (
+              <div>
+                <a href={renderStatus.url} style={styles.link} target="_blank" rel="noreferrer">
+                  Open Video
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Copy JSON pretty print */}
+        {copyJson && (
           <div style={styles.resultBox}>
             <div style={styles.resultTitle}>AI Script</div>
             <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
 {`{
-  "script": ${JSON.stringify(script)},
-  "caption": ${JSON.stringify(caption)},
-  "hashtags": ${JSON.stringify(hashtags, null, 2)}
+  "script": ${JSON.stringify(copyJson.script ?? "")},
+  "caption": ${JSON.stringify(copyJson.caption ?? "")},
+  "hashtags": ${JSON.stringify(copyJson.hashtags ?? [])}
 }`}
             </pre>
           </div>
         )}
       </div>
+
       <footer style={styles.footer}>© Orion Studio — MVP</footer>
     </main>
   );
@@ -190,7 +227,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   card: {
     width: "100%",
-    maxWidth: 880,
+    maxWidth: 980,
     background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
