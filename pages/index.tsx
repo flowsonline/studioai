@@ -1,315 +1,154 @@
 // pages/index.tsx
-import React, { useEffect, useState } from "react";
-
-type RenderStatus = {
-  status?: "queued" | "processing" | "succeeded" | "failed" | string;
-  progress?: number;
-  url?: string | null;
-};
+import React, { useState, useEffect } from "react";
 
 const tones = ["Cinematic", "Bold", "Energetic", "Friendly", "Elegant", "Professional"] as const;
 const formats = ["Reel (9:16)", "Story (9:16)", "Square (1:1)", "Wide (16:9)"] as const;
 
 export default function Home() {
-  // basic inputs
   const [desc, setDesc] = useState("");
-  const [tone, setTone] = useState<(typeof tones)[number]>("Cinematic");
-  const [format, setFormat] = useState<(typeof formats)[number]>("Reel (9:16)");
+  const [tone, setTone] = useState<typeof tones[number]>("Cinematic");
+  const [format, setFormat] = useState<typeof formats[number]>("Reel (9:16)");
 
-  // status / result
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // copy results (OpenAI)
-  const [copyLoading, setCopyLoading] = useState(false);
-  const [copyJson, setCopyJson] = useState<any | null>(null);
-
-  // eden render (async job)
   const [jobId, setJobId] = useState<string | null>(null);
-  const [renderStatus, setRenderStatus] = useState<RenderStatus | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [renderStatus, setRenderStatus] = useState<string | null>(null);
 
-  // ----- POLLING: Eden job status -----
+  // Poll Eden job status if we have a jobId
   useEffect(() => {
     if (!jobId) return;
-    const iv = setInterval(async () => {
+
+    const interval = setInterval(async () => {
       try {
-        const r = await fetch(`/api/status?jobId=${encodeURIComponent(jobId)}`);
-        const j = await r.json();
-        setRenderStatus(j);
-        if (j.status === "succeeded" || j.status === "failed") clearInterval(iv);
-      } catch (e: any) {
-        // stop polling if we get an error
-        clearInterval(iv);
-        setError(e?.message || "Status polling failed");
+        const res = await fetch(`/api/status?jobId=${encodeURIComponent(jobId)}`);
+        const data = await res.json();
+
+        setRenderStatus(data.status);
+
+        if (data.status === "succeeded" && data.url) {
+          setResultUrl(data.url);
+          clearInterval(interval);
+          setLoading(false);
+        }
+
+        if (data.status === "failed") {
+          setError("Video generation failed");
+          clearInterval(interval);
+          setLoading(false);
+        }
+      } catch (err: any) {
+        setError(err.message || "Polling failed");
+        clearInterval(interval);
+        setLoading(false);
       }
-    }, 900);
-    return () => clearInterval(iv);
+    }, 5000); // poll every 5 seconds
+
+    return () => clearInterval(interval);
   }, [jobId]);
 
-  // ----- Generate video (Eden async or simulator via env flag) -----
+  // Handle Generate click
   async function handleGenerate() {
     setError(null);
-    setRenderStatus(null);
-    setJobId(null);
+    setResultUrl(null);
     setLoading(true);
+    setJobId(null);
+    setRenderStatus(null);
+
     try {
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: desc,
-          provider: "pika", // or "pikalabs", depends on your Eden plan
-          // you can include tone/format here if you want to guide the prompt
-        }),
+        body: JSON.stringify({ prompt: desc, tone, format }),
       });
 
       if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || `Render failed (${res.status})`);
+        throw new Error(`Render failed (${res.status})`);
       }
 
       const data = await res.json();
-      // If Eden returns a job, we poll. If simulator (or direct url) returns previewUrl, show it immediately.
+
       if (data.jobId) {
-        setJobId(String(data.jobId));
-      } else if (data.previewUrl) {
-        setRenderStatus({ status: "succeeded", url: data.previewUrl });
+        setJobId(data.jobId);
+      } else if (data.url) {
+        // some providers might return url directly
+        setResultUrl(data.url);
+        setLoading(false);
       } else {
-        setError("Eden did not return a jobId or URL.");
+        throw new Error("No jobId or url returned from backend");
       }
-    } catch (e: any) {
-      setError(e?.message || "Something went wrong");
-    } finally {
+    } catch (err: any) {
+      setError(err.message || "Unexpected error");
       setLoading(false);
-    }
-  }
-
-  // ----- Generate Copy (OpenAI) -----
-  async function handleGenerateCopy() {
-    setError(null);
-    setCopyJson(null);
-    setCopyLoading(true);
-    try {
-      const res = await fetch("/api/generate-copy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: desc }),
-      });
-
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || `Copy failed (${res.status})`);
-      }
-
-      const data = await res.json();
-      setCopyJson(data); // we expect { script, caption, hashtags } from your API
-    } catch (e: any) {
-      setError(e?.message || "Copy generation failed");
-    } finally {
-      setCopyLoading(false);
     }
   }
 
   return (
     <main style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.title}>
-          Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.
-        </div>
-        <div style={styles.sub}>
-          Tell me what you’re posting today and I’ll mock up your ad. (Real video uses Eden async jobs with polling.)
-        </div>
+      <h1 style={styles.title}>Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.</h1>
+      <p>Tell me what you’re posting today and I’ll mock up your ad.</p>
 
-        <label style={styles.label}>Post description</label>
+      <div style={styles.form}>
+        <label>Post description</label>
         <textarea
-          placeholder="e.g., 15s ad for a coffee shop launch by the beach, upbeat and friendly."
-          style={styles.textarea}
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
+          style={styles.textarea}
+          placeholder="15s ad for a coffee shop launch, upbeat."
         />
 
         <div style={styles.row}>
-          <div style={styles.col}>
-            <label style={styles.label}>Tone</label>
-            <select style={styles.select} value={tone} onChange={(e) => setTone(e.target.value as any)}>
+          <div>
+            <label>Tone</label>
+            <select value={tone} onChange={(e) => setTone(e.target.value as typeof tones[number])}>
               {tones.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
+                <option key={t}>{t}</option>
               ))}
             </select>
           </div>
-          <div style={styles.col}>
-            <label style={styles.label}>Format</label>
-            <select style={styles.select} value={format} onChange={(e) => setFormat(e.target.value as any)}>
+
+          <div>
+            <label>Format</label>
+            <select value={format} onChange={(e) => setFormat(e.target.value as typeof formats[number])}>
               {formats.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
+                <option key={f}>{f}</option>
               ))}
             </select>
           </div>
         </div>
 
-        {/* Buttons */}
-        <button
-          onClick={handleGenerate}
-          style={styles.button}
-          disabled={loading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate with Eden (or simulator based on env)"}
-        >
-          {loading ? "Generating…" : "Generate (Simulated / Eden)"}
+        <button onClick={handleGenerate} style={styles.button} disabled={loading}>
+          {loading ? "Generating..." : "Generate Video"}
         </button>
-
-        <button
-          onClick={handleGenerateCopy}
-          style={styles.button}
-          disabled={copyLoading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate AI copy (OpenAI)"}
-        >
-          {copyLoading ? "Generating Copy…" : "Generate Copy (AI)"}
-        </button>
-
-        {/* Error box */}
-        {error && (
-          <div style={styles.error}>
-            ⚠️ <code>{JSON.stringify({ error })}</code>
-          </div>
-        )}
-
-        {/* Render status / link */}
-        {renderStatus && (
-          <div style={styles.resultBox}>
-            <div style={styles.resultTitle}>Render Status</div>
-            <div style={styles.resultHint}>
-              {renderStatus.status} {renderStatus.progress != null ? `— ${renderStatus.progress}%` : ""}
-            </div>
-            {renderStatus.url && (
-              <div>
-                <a href={renderStatus.url} style={styles.link} target="_blank" rel="noreferrer">
-                  Open Video
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Copy JSON pretty print */}
-        {copyJson && (
-          <div style={styles.resultBox}>
-            <div style={styles.resultTitle}>AI Script</div>
-            <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-{`{
-  "script": ${JSON.stringify(copyJson.script ?? "")},
-  "caption": ${JSON.stringify(copyJson.caption ?? "")},
-  "hashtags": ${JSON.stringify(copyJson.hashtags ?? [])}
-}`}
-            </pre>
-          </div>
-        )}
       </div>
 
-      <footer style={styles.footer}>© Orion Studio — MVP</footer>
+      {error && <div style={styles.error}>⚠️ {error}</div>}
+
+      {renderStatus && !resultUrl && (
+        <div style={styles.statusBox}>
+          Status: {renderStatus} {jobId && <>(Job ID: {jobId})</>}
+        </div>
+      )}
+
+      {resultUrl && (
+        <div style={styles.resultBox}>
+          <h3>Final Result</h3>
+          <video src={resultUrl} controls width="480" />
+        </div>
+      )}
     </main>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100svh",
-    background: "radial-gradient(60% 60% at 50% 20%, #0b1220 0%, #05080f 60%, #04060b 100%)",
-    color: "#e8eefc",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "40px 16px",
-    boxSizing: "border-box",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 980,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.06)",
-    borderRadius: 16,
-    padding: 24,
-    boxShadow: "0 10px 60px rgba(0,0,0,0.35)",
-    backdropFilter: "blur(8px)",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 700,
-    marginBottom: 8,
-  },
-  sub: {
-    opacity: 0.8,
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 13,
-    opacity: 0.8,
-    margin: "10px 0 6px",
-    display: "block",
-  },
-  textarea: {
-    width: "100%",
-    minHeight: 110,
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(0,0,0,0.25)",
-    color: "#e8eefc",
-    padding: 12,
-    outline: "none",
-  },
-  row: {
-    display: "flex",
-    gap: 12,
-    marginTop: 10,
-    flexWrap: "wrap",
-  },
-  col: {
-    flex: 1,
-    minWidth: 220,
-  },
-  select: {
-    width: "100%",
-    height: 40,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(0,0,0,0.25)",
-    color: "#e8eefc",
-    padding: "0 10px",
-    outline: "none",
-    appearance: "none",
-  },
-  button: {
-    width: "100%",
-    height: 46,
-    marginTop: 16,
-    borderRadius: 12,
-    border: "1px solid rgba(122,162,255,0.35)",
-    background: "linear-gradient(180deg, #87a6ff 0%, #6d8cff 100%)",
-    color: "#071020",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  error: {
-    marginTop: 14,
-    padding: "10px 12px",
-    border: "1px solid rgba(255, 120, 120, 0.4)",
-    background: "rgba(120, 0, 0, 0.25)",
-    borderRadius: 10,
-    color: "#ffbaba",
-    fontSize: 14,
-  },
-  resultBox: {
-    marginTop: 16,
-    padding: 14,
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-  },
-  resultTitle: { fontWeight: 700, marginBottom: 6 },
-  resultHint: { opacity: 0.8, fontSize: 13, marginBottom: 8 },
-  link: { color: "#7aa2ff", textDecoration: "underline" },
-  footer: { position: "fixed", bottom: 10, opacity: 0.6, fontSize: 12 },
+  page: { padding: "2rem", fontFamily: "sans-serif", color: "#E8EEFF", background: "#0B0F1A", minHeight: "100vh" },
+  title: { fontSize: "1.8rem", marginBottom: "1rem" },
+  form: { background: "#0F1629", padding: "1rem", borderRadius: 12, marginBottom: "1rem" },
+  textarea: { width: "100%", height: 80, marginTop: 8, marginBottom: 12 },
+  row: { display: "flex", gap: "1rem", marginBottom: "1rem" },
+  button: { background: "#7aa2ff", color: "#071020", fontWeight: 700, padding: "10px 16px", border: "none", borderRadius: 8, cursor: "pointer" },
+  error: { marginTop: 12, color: "#ff6b6b", fontWeight: "bold" },
+  statusBox: { marginTop: 12, padding: "8px 12px", background: "#1f2a48", borderRadius: 8 },
+  resultBox: { marginTop: 16, padding: 12, background: "#1f2a48", borderRadius: 8 },
 };
