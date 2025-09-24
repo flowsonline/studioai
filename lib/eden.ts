@@ -1,125 +1,64 @@
 // lib/eden.ts
-type StartArgs = {
+// Real Eden AI call with a safe simulator switch
+
+const USE_EDEN_SIMULATOR =
+  (process.env.USE_EDEN_SIMULATOR ?? "true").toLowerCase() !== "false";
+
+const EDEN_API_KEY = process.env.EDEN_API_KEY || "";
+const EDEN_BASE = "https://api.edenai.run/v2"; // <-- MUST be absolute!
+
+type StartOut = { jobId?: string; previewUrl?: string; url?: string };
+
+export async function startVideo(opts: {
   prompt: string;
   tone?: string;
   format?: string;
-};
-
-const SAMPLE_URL =
-  "https://filesamples.com/samples/video/mp4/sample_640x360.mp4";
-
-const useSim = (process.env.USE_EDEN_SIMULATOR ?? "true").toLowerCase() === "true";
-
-/**
- * startVideo
- * - If simulator = true → returns { jobId: 'sim', previewUrl }
- * - If simulator = false → POST to Eden. Returns { jobId }
- */
-export async function startVideo(args: StartArgs): Promise<{ jobId?: string; previewUrl?: string }> {
-  if (useSim) {
-    // Simulated (instant)
-    return { jobId: "sim", previewUrl: SAMPLE_URL };
+}) {
+  // Sim mode stays handy for local or when you flip the flag back
+  if (USE_EDEN_SIMULATOR || !EDEN_API_KEY) {
+    return {
+      previewUrl:
+        "https://filesamples.com/samples/video/mp4/sample_640x360.mp4",
+    } as StartOut;
   }
 
-  const apiKey = process.env.EDEN_API_KEY;
-  if (!apiKey) throw new Error("EDEN_API_KEY missing");
+  const { prompt } = opts;
 
-  // ❗ Adjust this endpoint & payload to match your Eden plan/provider.
-  // This is a safe default "text->video" shape—update as needed.
-  const EDEN_ENDPOINT =
-    process.env.EDEN_ENDPOINT ??
-    "https://api.edenai.run/v2/video/text_to_video"; // <- EDIT if your endpoint differs
+  // Example Eden text-to-video (Pika) via unified endpoint
+  // Docs: https://api.edenai.run/docs#tag/Video
+  const url = `${EDEN_BASE}/video/text_to_video`;
+  console.log("EDEN CALL →", url); // helpful to debug wrong host/paths
 
-  const body = {
-    text: args.prompt,
-    // Add extra fields Eden requires here (provider, model, duration, size, etc.)
-  };
-
-  const r = await fetch(EDEN_ENDPOINT, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${EDEN_API_KEY}`,
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      providers: "pika",          // provider to use
+      text: prompt,               // your prompt
+      resolution: "720p",         // optional
+      safe_mode: false,           // optional
+    }),
   });
 
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(`Eden start error: ${text}`);
-  }
-  const data = await r.json();
-
-  // Normalize possible IDs
-  const jobId = data.job_id || data.id || data.task_id;
-  if (!jobId) throw new Error("Eden response missing job id");
-
-  return { jobId };
-}
-
-/**
- * getJobStatus
- * - simulator → always "succeeded" with sample URL
- * - real → fetch Eden job status and normalize to { status, progress, url }
- */
-export async function getJobStatus(jobId: string): Promise<{
-  status: "queued" | "processing" | "succeeded" | "failed";
-  progress: number;
-  url?: string;
-  raw?: any;
-}> {
-  if (useSim || jobId === "sim") {
-    return { status: "succeeded", progress: 100, url: SAMPLE_URL };
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Eden start error: ${txt}`);
   }
 
-  const apiKey = process.env.EDEN_API_KEY;
-  if (!apiKey) throw new Error("EDEN_API_KEY missing");
+  const data = await res.json() as any;
 
-  // ❗ Adjust to your Eden status endpoint.
-  const STATUS_ENDPOINT =
-    process.env.EDEN_STATUS_ENDPOINT ??
-    "https://api.edenai.run/v2/video/status"; // <- EDIT if your endpoint differs
+  // Eden returns provider buckets. Pull a usable URL if available.
+  // Adjust this mapping if your account/provider returns a different shape.
+  const previewUrl =
+    data?.pika?.items?.[0]?.video_resource_url ||
+    data?.pika?.video_resource_url ||
+    data?.video_resource_url ||
+    null;
 
-  const r = await fetch(`${STATUS_ENDPOINT}?job_id=${encodeURIComponent(jobId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-
-  if (!r.ok) {
-    const text = await r.text();
-    throw new Error(`Eden status error: ${text}`);
-  }
-  const data = await r.json();
-
-  // Normalize common shapes
-  // Map whatever Eden returns into these fields.
-  const state =
-    (data.status as string)?.toLowerCase() ||
-    (data.state as string)?.toLowerCase() ||
-    "processing";
-
-  const status =
-    state.includes("success") || state === "succeeded"
-      ? "succeeded"
-      : state.includes("fail")
-      ? "failed"
-      : state.includes("queue")
-      ? "queued"
-      : "processing";
-
-  const progress =
-    typeof data.progress === "number"
-      ? Math.max(0, Math.min(100, data.progress))
-      : status === "succeeded"
-      ? 100
-      : 50;
-
-  // Try multiple fields for a final URL
-  const url =
-    data.output_url ||
-    data.url ||
-    data.result_url ||
-    data.output?.url ||
-    undefined;
-
-  return { status, progress, url, raw: data };
+  // If Eden returns a job-based workflow on your plan, you can return a jobId
+  // and let /api/status poll it. For now we return a URL when available.
+  return { url: previewUrl } as StartOut;
 }
