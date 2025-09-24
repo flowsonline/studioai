@@ -1,36 +1,63 @@
 // lib/openai.ts
+// Minimal OpenAI call that returns { script, caption, hashtags[] }
+// Assumes process.env.OPENAI_API_KEY is set in Vercel
+
 export async function generateCopy(prompt: string) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error('OPENAI_API_KEY missing');
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY missing");
+  }
 
-  const body = {
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: "You write concise ad scripts, punchy captions, and 10 relevant hashtags." },
-      { role: "user", content: `Brief: ${prompt}\nReturn JSON with keys: script, caption, hashtags (array).` }
-    ],
-    temperature: 0.7,
-  };
-
+  // You can adjust the model and prompt format to taste
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-    body: JSON.stringify(body)
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You generate short social video copy. Reply strictly as compact JSON with keys: script, caption, hashtags (array of short tags without #).",
+        },
+        {
+          role: "user",
+          content:
+            `Create script, caption, and 10 hashtags for this idea: "${prompt}". 
+Return JSON only.`,
+        },
+      ],
+      temperature: 0.7,
+    }),
   });
 
-  if (!r.ok) throw new Error(`OpenAI error: ${r.status}`);
-
-  const j = await r.json();
-  const text = j.choices?.[0]?.message?.content ?? "";
-
-  try {
-    const parsed = JSON.parse(text);
-    return {
-      script: parsed.script || "",
-      caption: parsed.caption || "",
-      hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : []
-    };
-  } catch {
-    return { script: text.trim(), caption: "", hashtags: [] };
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`OpenAI error: ${text}`);
   }
+
+  const data = await r.json();
+
+  // Try to parse JSON out of the assistant message
+  const msg = data?.choices?.[0]?.message?.content || "{}";
+  let parsed: any;
+  try {
+    parsed = JSON.parse(msg);
+  } catch {
+    // Fallback: attempt to strip code fences
+    const cleaned = msg.replace(/^```json\s*/i, "").replace(/```$/i, "");
+    parsed = JSON.parse(cleaned);
+  }
+
+  const script = parsed?.script ?? "";
+  const caption = parsed?.caption ?? "";
+  const hashtags = Array.isArray(parsed?.hashtags) ? parsed.hashtags : [];
+
+  // Prefix hashtags with #
+  const tagged = hashtags.map((h: string) => (h.startsWith("#") ? h : `#${h}`));
+
+  return { script, caption, hashtags: tagged };
 }
