@@ -1,20 +1,55 @@
 // lib/eden.ts
-// Real Eden AI call with a safe simulator switch
+// Robust Eden call with fallback endpoints + optional override
 
 const USE_EDEN_SIMULATOR =
   (process.env.USE_EDEN_SIMULATOR ?? "false").toLowerCase() === "true";
 
 const EDEN_API_KEY = process.env.EDEN_API_KEY || "";
-const EDEN_BASE = "https://api.edenai.run/v2"; // MUST be absolute
+const EDEN_BASE = "https://api.edenai.run/v2"; // absolute base
 
-type StartOut = { jobId?: string; previewUrl?: string };
+// Optional manual override in case your Eden workspace uses a custom route
+const EDEN_VIDEO_ENDPOINT = process.env.EDEN_VIDEO_ENDPOINT || "";
 
-export async function startVideo(opts: {
-  prompt: string;
-  tone?: string;
-  format?: string;
-}) {
-  // Keep sim handy for quick demos or local runs
+// Known text-to-video endpoints we've seen in the wild
+const CANDIDATE_PATHS = [
+  "/video/text_to_video",
+  "/video/generation",
+];
+
+type StartOut = { previewUrl?: string };
+
+async function callEden(path: string, prompt: string) {
+  const url = `${EDEN_BASE}${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${EDEN_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      // unified Eden payload
+      providers: "pika", // If your workspace uses different provider id, set EDEN_PROVIDER
+      text: prompt,
+      resolution: "720p",
+      safe_mode: false,
+    }),
+  });
+  return res;
+}
+
+function pickPreviewUrl(data: any): string | null {
+  // Cover common Eden response shapes for video
+  return (
+    data?.pika?.items?.[0]?.video_resource_url ||
+    data?.pika?.video_resource_url ||
+    data?.video_resource_url ||
+    data?.output?.[0]?.video_resource_url ||
+    data?.result?.url ||
+    null
+  );
+}
+
+export async function startVideo(opts: { prompt: string; tone?: string; format?: string }) {
   if (USE_EDEN_SIMULATOR || !EDEN_API_KEY) {
     return {
       previewUrl:
@@ -24,37 +59,47 @@ export async function startVideo(opts: {
 
   const { prompt } = opts;
 
-  // Eden Video: text_to_video (provider: pika)
-  const url = `${EDEN_BASE}/video/text_to_video`;
-  console.log("EDEN CALL →", url); // viewable in Vercel logs
+  // If user provided a custom endpoint, try that first
+  const paths = EDEN_VIDEO_ENDPOINT
+    ? [EDEN_VIDEO_ENDPOINT, ...CANDIDATE_PATHS]
+    : CANDIDATE_PATHS;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${EDEN_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      providers: "pika",     // some accounts use "pika", others "pika-labs"
-      text: prompt,
-      resolution: "720p",
-      safe_mode: false,
-    }),
-  });
+  let lastErrText = "";
+  for (const path of paths) {
+    try {
+      const res = await callEden(path, prompt);
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Eden start error (${res.status}): ${text}`);
+      // Eden sometimes returns HTML on 404 — detect and throw clean error
+      const contentType = res.headers.get("content-type") || "";
+      if (!res.ok) {
+        const text = await res.text();
+        lastErrText = `(${res.status}) ${text.slice(0, 500)}`;
+        // Try next path
+        continue;
+      }
+
+      // Prefer JSON; if HTML sneaks in here it's the wrong route
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        lastErrText = `Unexpected content-type "${contentType}" @ ${path}: ${text.slice(0, 500)}`;
+        continue;
+      }
+
+      const data = await res.json();
+      const previewUrl = pickPreviewUrl(data);
+      if (!previewUrl) {
+        lastErrText = `No preview URL in response for ${path}: ${JSON.stringify(data).slice(0, 500)}`;
+        continue;
+      }
+
+      return { previewUrl } as StartOut;
+    } catch (e: any) {
+      lastErrText = e?.message || String(e);
+      continue;
+    }
   }
 
-  const data = (await res.json()) as any;
-
-  // Provider-normalized result mapping.
-  const previewUrl =
-    data?.pika?.items?.[0]?.video_resource_url ||
-    data?.pika?.video_resource_url ||
-    data?.video_resource_url ||
-    null;
-
-  return { previewUrl } as StartOut;
+  throw new Error(
+    `Eden start error: could not resolve a valid endpoint. ${lastErrText}`
+  );
 }
