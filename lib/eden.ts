@@ -2,19 +2,19 @@
 // Real Eden AI call with a safe simulator switch
 
 const USE_EDEN_SIMULATOR =
-  (process.env.USE_EDEN_SIMULATOR ?? "true").toLowerCase() !== "false";
+  (process.env.USE_EDEN_SIMULATOR ?? "false").toLowerCase() === "true";
 
 const EDEN_API_KEY = process.env.EDEN_API_KEY || "";
-const EDEN_BASE = "https://api.edenai.run/v2"; // <-- MUST be absolute!
+const EDEN_BASE = "https://api.edenai.run/v2"; // MUST be absolute
 
-type StartOut = { jobId?: string; previewUrl?: string; url?: string };
+type StartOut = { jobId?: string; previewUrl?: string };
 
 export async function startVideo(opts: {
   prompt: string;
   tone?: string;
   format?: string;
 }) {
-  // Sim mode stays handy for local or when you flip the flag back
+  // Keep sim handy for quick demos or local runs
   if (USE_EDEN_SIMULATOR || !EDEN_API_KEY) {
     return {
       previewUrl:
@@ -24,10 +24,9 @@ export async function startVideo(opts: {
 
   const { prompt } = opts;
 
-  // Example Eden text-to-video (Pika) via unified endpoint
-  // Docs: https://api.edenai.run/docs#tag/Video
+  // Eden Video: text_to_video (provider: pika)
   const url = `${EDEN_BASE}/video/text_to_video`;
-  console.log("EDEN CALL →", url); // helpful to debug wrong host/paths
+  console.log("EDEN CALL →", url); // viewable in Vercel logs
 
   const res = await fetch(url, {
     method: "POST",
@@ -36,29 +35,26 @@ export async function startVideo(opts: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      providers: "pika",          // provider to use
-      text: prompt,               // your prompt
-      resolution: "720p",         // optional
-      safe_mode: false,           // optional
+      providers: "pika",     // some accounts use "pika", others "pika-labs"
+      text: prompt,
+      resolution: "720p",
+      safe_mode: false,
     }),
   });
 
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Eden start error: ${txt}`);
+    const text = await res.text();
+    throw new Error(`Eden start error (${res.status}): ${text}`);
   }
 
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
 
-  // Eden returns provider buckets. Pull a usable URL if available.
-  // Adjust this mapping if your account/provider returns a different shape.
+  // Provider-normalized result mapping.
   const previewUrl =
     data?.pika?.items?.[0]?.video_resource_url ||
     data?.pika?.video_resource_url ||
     data?.video_resource_url ||
     null;
 
-  // If Eden returns a job-based workflow on your plan, you can return a jobId
-  // and let /api/status poll it. For now we return a URL when available.
-  return { url: previewUrl } as StartOut;
+  return { previewUrl } as StartOut;
 }
