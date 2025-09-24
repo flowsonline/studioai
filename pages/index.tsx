@@ -16,45 +16,40 @@ export default function Home() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
 
-  // Poll Eden job status if we have a jobId
+  // Poll status if we have a jobId
   useEffect(() => {
     if (!jobId) return;
-
-    const interval = setInterval(async () => {
+    const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/status?jobId=${encodeURIComponent(jobId)}`);
-        const data = await res.json();
+        const r = await fetch(`/api/status?jobId=${encodeURIComponent(jobId)}`);
+        const j = await r.json();
+        setRenderStatus(j.status);
 
-        setRenderStatus(data.status);
-
-        if (data.status === "succeeded" && data.url) {
-          setResultUrl(data.url);
-          clearInterval(interval);
+        if (j.status === "succeeded" && j.url) {
+          setResultUrl(j.url);
           setLoading(false);
+          clearInterval(iv);
         }
-
-        if (data.status === "failed") {
-          setError("Video generation failed");
-          clearInterval(interval);
+        if (j.status === "failed") {
+          setError(j.error || "Video generation failed");
           setLoading(false);
+          clearInterval(iv);
         }
-      } catch (err: any) {
-        setError(err.message || "Polling failed");
-        clearInterval(interval);
+      } catch (e: any) {
+        setError(e?.message || "Polling failed");
         setLoading(false);
+        clearInterval(iv);
       }
-    }, 5000); // poll every 5 seconds
-
-    return () => clearInterval(interval);
+    }, 5000);
+    return () => clearInterval(iv);
   }, [jobId]);
 
-  // Handle Generate click
   async function handleGenerate() {
     setError(null);
     setResultUrl(null);
-    setLoading(true);
     setJobId(null);
     setRenderStatus(null);
+    setLoading(true);
 
     try {
       const res = await fetch("/api/render", {
@@ -62,31 +57,27 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: desc, tone, format }),
       });
-
-      if (!res.ok) {
-        throw new Error(`Render failed (${res.status})`);
-      }
-
+      if (!res.ok) throw new Error(`Render failed (${res.status})`);
       const data = await res.json();
 
-      if (data.jobId) {
-        setJobId(data.jobId);
-      } else if (data.url) {
-        // some providers might return url directly
+      if (data.jobId) setJobId(data.jobId);
+      else if (data.url) {
         setResultUrl(data.url);
         setLoading(false);
       } else {
-        throw new Error("No jobId or url returned from backend");
+        throw new Error("No jobId or url returned");
       }
-    } catch (err: any) {
-      setError(err.message || "Unexpected error");
+    } catch (e: any) {
+      setError(e?.message || "Unexpected error");
       setLoading(false);
     }
   }
 
   return (
     <main style={styles.page}>
-      <h1 style={styles.title}>Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.</h1>
+      <h1 style={styles.title}>
+        Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.
+      </h1>
       <p>Tell me what you’re posting today and I’ll mock up your ad.</p>
 
       <div style={styles.form}>
