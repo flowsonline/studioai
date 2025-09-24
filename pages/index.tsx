@@ -34,7 +34,7 @@ export default function Home() {
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState<string[]>([]);
 
-  // --- Simulated render ---
+  // Button 1 — Simulated “Render”
   async function handleGenerate() {
     setLoading(true);
     setError(null);
@@ -48,7 +48,7 @@ export default function Home() {
           prompt: desc,
           tone,
           format,
-          simulate: true, // server sim by default now
+          simulate: true, // server will simulate a render
         }),
       });
 
@@ -58,7 +58,7 @@ export default function Home() {
       }
 
       const data = await res.json();
-      setResultUrl(data.previewUrl || null);
+      setResultUrl(data.previewUrl || null); // mock link in sim mode
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
     } finally {
@@ -66,24 +66,29 @@ export default function Home() {
     }
   }
 
-  // --- OpenAI copy generation ---
+  // Button 2 — Generate Copy (OpenAI)
   async function handleGenerateCopy() {
-    setCopyLoading(true);
-    setError(null);
     try {
+      setCopyLoading(true);
+      setError(null);
+
       const res = await fetch("/api/generate-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: desc, tone, format }),
+        body: JSON.stringify({ prompt: desc }),
       });
-      if (!res.ok) throw new Error(await res.text());
+
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || `Copy failed (${res.status})`);
+      }
 
       const data = await res.json();
       setScript(data.script || "");
       setCaption(data.caption || "");
       setHashtags(data.hashtags || []);
-    } catch (e: any) {
-      setError(e?.message || "Copy failed");
+    } catch (err: any) {
+      setError(err?.message || "Copy failed");
     } finally {
       setCopyLoading(false);
     }
@@ -138,7 +143,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Buttons */}
+        {/* Button 1: Simulated render */}
         <button
           onClick={handleGenerate}
           style={styles.button}
@@ -148,19 +153,18 @@ export default function Home() {
           {loading ? "Generating…" : "Generate (Simulated)"}
         </button>
 
+        {/* Button 2: AI copy generation */}
         <button
           onClick={handleGenerateCopy}
-          style={{ ...styles.button, marginTop: 10 }}
+          style={styles.button}
           disabled={copyLoading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate Copy"}
+          title={!desc.trim() ? "Add a short description first" : "Generate Copy (AI)"}
         >
-          {copyLoading ? "Generating Copy…" : "Generate Copy (OpenAI)"}
+          {copyLoading ? "Generating Copy…" : "Generate Copy (AI)"}
         </button>
 
-        {/* Errors */}
         {error && <div style={styles.error}>⚠️ {error}</div>}
 
-        {/* Sim render result */}
         {resultUrl && (
           <div style={styles.resultBox}>
             <div style={styles.resultTitle}>Mock Result</div>
@@ -171,30 +175,29 @@ export default function Home() {
           </div>
         )}
 
-        {/* Copy result */}
-        {(script || caption || hashtags.length > 0) && (
+        {script && (
           <div style={styles.resultBox}>
-            <div style={styles.resultTitle}>Copy</div>
-            {script && (
-              <div style={{ marginTop: 6 }}>
-                <strong>Script:</strong> {script}
-              </div>
-            )}
-            {caption && (
-              <div style={{ marginTop: 6 }}>
-                <strong>Caption:</strong> {caption}
-              </div>
-            )}
-            {hashtags.length > 0 && (
-              <div style={{ marginTop: 6 }}>
-                <strong>Hashtags:</strong> {hashtags.map((h) => `#${h}`).join(" ")}
-              </div>
-            )}
+            <div style={styles.resultTitle}>AI Script</div>
+            <pre>{script}</pre>
+          </div>
+        )}
+
+        {caption && (
+          <div style={styles.resultBox}>
+            <div style={styles.resultTitle}>AI Caption</div>
+            <p>{caption}</p>
+          </div>
+        )}
+
+        {hashtags.length > 0 && (
+          <div style={styles.resultBox}>
+            <div style={styles.resultTitle}>Hashtags</div>
+            <p>{hashtags.join(" ")}</p>
           </div>
         )}
       </div>
 
-      <footer style={styles.footer}>© Orion Studio — MVP</footer>
+      <footer style={styles.footer}>© Orion Studio — MVP (sim mode)</footer>
     </main>
   );
 }
@@ -202,7 +205,8 @@ export default function Home() {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100svh",
-    background: "radial-gradient(60% 60% at 50% 20%, #0b1220 0%, #05080f 60%, #04060b 100%)",
+    background:
+      "radial-gradient(60% 60% at 50% 20%, #0b1220 0%, #05080f 60%, #04060b 100%)",
     color: "#e8eefc",
     display: "flex",
     alignItems: "center",
@@ -295,6 +299,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   resultTitle: { fontWeight: 700, marginBottom: 6 },
   resultHint: { opacity: 0.8, fontSize: 13, marginBottom: 8 },
-  link: { color: "#7aa2ff", textDecoration: "underline", wordBreak: "break-all" },
+  link: { color: "#7aa2ff", textDecoration: "underline" },
   footer: { position: "fixed", bottom: 10, opacity: 0.6, fontSize: 12 },
 };
