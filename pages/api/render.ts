@@ -8,13 +8,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
   try {
-    const { prompt = "", provider } = req.body || {};
-    if (!prompt.trim()) return res.status(400).json({ error: "Missing prompt" });
+    const { prompt, tone, format } = req.body || {};
+    if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
 
-    const out = await startVideo({ prompt, provider });
-    // If a provider ever returns a direct url immediately, pass it along
+    const out = await startVideo({ prompt, tone, format });
     return res.status(200).json(out);
   } catch (e: any) {
-    return res.status(500).json({ error: e?.message || "Render failed" });
+    return res.status(500).json({ error: e.message || "Render failed" });
   }
 }
