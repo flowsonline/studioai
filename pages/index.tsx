@@ -2,8 +2,9 @@ import React, { useState } from "react";
 
 /**
  * Orion Studio — MVP UI
- * - Button 1: Generate (Simulated)  → POST /api/render  (returns previewUrl in sim mode)
- * - Button 2: Generate Copy (OpenAI)→ POST /api/generate-copy (returns script/caption/hashtags)
+ * - Button 1: Generate (Simulated / or Real if USE_EDEN_SIMULATOR=false)
+ * - Button 2: Generate Copy (OpenAI) → /api/generate-copy (script/caption/hashtags)
+ * - Status box shows progress + final URL when real Eden is active
  */
 
 const tones = [
@@ -23,25 +24,36 @@ export default function Home() {
   const [tone, setTone] = useState<(typeof tones)[number]>("Cinematic");
   const [format, setFormat] = useState<(typeof formats)[number]>("Reel (9:16)");
 
-  // Render (sim) state
+  // Render (sim/real) state
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Copy generation (OpenAI) state
+  // NEW: job + status for real Eden polling
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [renderStatus, setRenderStatus] = useState<{
+    status?: string;
+    progress?: number;
+    url?: string;
+  } | null>(null);
+
+  // AI Copy state
   const [copyLoading, setCopyLoading] = useState(false);
   const [script, setScript] = useState("");
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState<string[]>([]);
 
-  // TEMP DEBUG: raw response from /api/generate-copy
-  const [rawResponse, setRawResponse] = useState<any>(null);
-
-  // 1) Simulated “render”
+  /**
+   * Button 1: Generate (Simulated/Real)
+   * - Simulator: returns previewUrl immediately
+   * - Real: returns jobId, then we poll /api/status
+   */
   async function handleGenerate() {
     setLoading(true);
     setError(null);
     setResultUrl(null);
+    setRenderStatus(null);
+    setJobId(null);
 
     try {
       const res = await fetch("/api/render", {
@@ -51,7 +63,6 @@ export default function Home() {
           prompt: desc,
           tone,
           format,
-          simulate: true, // server returns a mock previewUrl
         }),
       });
 
@@ -61,7 +72,32 @@ export default function Home() {
       }
 
       const data = await res.json();
-      setResultUrl(data.previewUrl || null);
+
+      // Simulator returns previewUrl immediately
+      if (data.previewUrl) {
+        setResultUrl(data.previewUrl);
+        setRenderStatus({ status: "succeeded", progress: 100, url: data.previewUrl });
+        return;
+      }
+
+      // Real job → poll /api/status
+      if (data.jobId) {
+        setJobId(data.jobId);
+        const poll = setInterval(async () => {
+          try {
+            const r = await fetch(`/api/status?jobId=${encodeURIComponent(data.jobId)}`);
+            const j = await r.json();
+            setRenderStatus(j);
+            if (j.status === "succeeded" || j.status === "failed") {
+              clearInterval(poll);
+              if (j.url) setResultUrl(j.url);
+            }
+          } catch (e) {
+            clearInterval(poll);
+            setError("Failed to check status");
+          }
+        }, 1200);
+      }
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
     } finally {
@@ -69,11 +105,16 @@ export default function Home() {
     }
   }
 
-  // 2) Real “copy” generation (OpenAI via /api/generate-copy)
+  /**
+   * Button 2: Generate Copy (AI)
+   * - Calls /api/generate-copy → returns { script, caption, hashtags[] }
+   */
   async function handleGenerateCopy() {
     setCopyLoading(true);
     setError(null);
-    setRawResponse(null);
+    setScript("");
+    setCaption("");
+    setHashtags([]);
 
     try {
       const res = await fetch("/api/generate-copy", {
@@ -88,28 +129,24 @@ export default function Home() {
       }
 
       const data = await res.json();
-
-      // TEMP DEBUG
-      console.log("🔎 OpenAI raw response:", data);
-      setRawResponse(data);
-
       setScript(data.script || "");
       setCaption(data.caption || "");
       setHashtags(Array.isArray(data.hashtags) ? data.hashtags : []);
-    } catch (e: any) {
-      setError(e?.message || "Copy generation failed");
+    } catch (err: any) {
+      setError(err?.message || "Copy failed");
     } finally {
       setCopyLoading(false);
     }
   }
 
+  // Render
   return (
     <main style={styles.page}>
       <div style={styles.card}>
         <div style={styles.title}>
           Hi, I’m <span style={{ color: "#7aa2ff" }}>Orion</span> — Your Social Media Manager Assistant.
         </div>
-        <div style={styles.sub}>Tell me what you’re posting today and I’ll mock up your ad (simulated).</div>
+        <div style={styles.sub}>Tell me what you’re posting today and I’ll mock up your ad.</div>
 
         <label style={styles.label}>Post description</label>
         <textarea
@@ -142,53 +179,49 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Buttons */}
+        {/* Button 1 */}
         <button
           onClick={handleGenerate}
           style={styles.button}
           disabled={loading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate (simulated)"}
+          title={!desc.trim() ? "Add a short description first" : "Render video"}
         >
           {loading ? "Generating…" : "Generate (Simulated)"}
         </button>
 
+        {/* Button 2 */}
         <button
           onClick={handleGenerateCopy}
           style={{ ...styles.button, marginTop: 12 }}
           disabled={copyLoading || !desc.trim()}
-          title={!desc.trim() ? "Add a short description first" : "Generate Copy (AI)"}
+          title={!desc.trim() ? "Add a short description first" : "Generate copy with AI"}
         >
           {copyLoading ? "Generating Copy…" : "Generate Copy (AI)"}
         </button>
 
+        {/* Error banner */}
         {error && <div style={styles.error}>⚠️ {error}</div>}
 
-        {/* Copy results */}
-        {(script || caption || hashtags.length > 0) && (
+        {/* NEW: Render status box (works for sim + real) */}
+        {renderStatus && (
           <div style={styles.resultBox}>
-            <div style={styles.resultTitle}>AI Copy</div>
-            {script && (
-              <>
-                <div style={styles.resultHint}>Script</div>
-                <div>{script}</div>
-              </>
-            )}
-            {caption && (
-              <>
-                <div style={{ ...styles.resultHint, marginTop: 8 }}>Caption</div>
-                <div>{caption}</div>
-              </>
-            )}
-            {hashtags.length > 0 && (
-              <>
-                <div style={{ ...styles.resultHint, marginTop: 8 }}>Hashtags</div>
-                <div>{hashtags.map((h) => `#${h}`).join(" ")}</div>
-              </>
+            <div style={styles.resultTitle}>Render Status</div>
+            <div>
+              <strong>Status:</strong> {renderStatus.status ?? "starting…"} —{" "}
+              {renderStatus.progress ?? 0}%
+            </div>
+            {jobId && <div style={styles.resultHint}>Job: {jobId}</div>}
+            {renderStatus.url && (
+              <div style={{ marginTop: 6 }}>
+                <a href={renderStatus.url} style={styles.link} target="_blank" rel="noreferrer">
+                  Open Video
+                </a>
+              </div>
             )}
           </div>
         )}
 
-        {/* Mock result (sim) */}
+        {/* Mock Result (still useful in sim mode) */}
         {resultUrl && (
           <div style={styles.resultBox}>
             <div style={styles.resultTitle}>Mock Result</div>
@@ -199,15 +232,25 @@ export default function Home() {
           </div>
         )}
 
-        {/* TEMP DEBUG: raw OpenAI JSON */}
-        {rawResponse && (
+        {/* AI Copy output */}
+        {(script || caption || hashtags.length) && (
           <div style={styles.resultBox}>
             <div style={styles.resultTitle}>AI Script</div>
-            <pre style={styles.pre}>{JSON.stringify(rawResponse, null, 2)}</pre>
+            <pre
+              style={{
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                fontSize: 13,
+              }}
+            >{`{
+  "script": ${JSON.stringify(script)},
+  "caption": ${JSON.stringify(caption)},
+  "hashtags": ${JSON.stringify(hashtags, null, 2)}
+}`}</pre>
           </div>
         )}
       </div>
-
       <footer style={styles.footer}>© Orion Studio — MVP</footer>
     </main>
   );
@@ -226,7 +269,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   card: {
     width: "100%",
-    maxWidth: 880,
+    maxWidth: 980,
     background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 16,
@@ -234,9 +277,21 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 10px 60px rgba(0,0,0,0.35)",
     backdropFilter: "blur(8px)",
   },
-  title: { fontSize: 24, fontWeight: 700, marginBottom: 8 },
-  sub: { opacity: 0.8, marginBottom: 20 },
-  label: { fontSize: 13, opacity: 0.8, margin: "10px 0 6px", display: "block" },
+  title: {
+    fontSize: 24,
+    fontWeight: 700,
+    marginBottom: 8,
+  },
+  sub: {
+    opacity: 0.8,
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 13,
+    opacity: 0.8,
+    margin: "10px 0 6px",
+    display: "block",
+  },
   textarea: {
     width: "100%",
     minHeight: 110,
@@ -247,8 +302,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 12,
     outline: "none",
   },
-  row: { display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" },
-  col: { flex: 1, minWidth: 220 },
+  row: {
+    display: "flex",
+    gap: 12,
+    marginTop: 10,
+    flexWrap: "wrap",
+  },
+  col: {
+    flex: 1,
+    minWidth: 220,
+  },
   select: {
     width: "100%",
     height: 40,
@@ -280,19 +343,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#ffbaba",
     fontSize: 14,
   },
-  resultBox: { marginTop: 16, padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)" },
-  resultTitle: { fontWeight: 700, marginBottom: 6 },
-  resultHint: { opacity: 0.8, fontSize: 13, marginBottom: 8 },
-  link: { color: "#7aa2ff", textDecoration: "underline" },
-  pre: {
-    whiteSpace: "pre-wrap",
-    fontSize: 13,
-    lineHeight: 1.35,
-    color: "#d7e2ff",
-    background: "#1d2636",
-    padding: 10,
-    borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.06)",
+  resultBox: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.03)",
   },
+  resultTitle: { fontWeight: 700, marginBottom: 6 },
+  resultHint: { opacity: 0.8, fontSize: 13, marginTop: 6 },
+  link: { color: "#7aa2ff", textDecoration: "underline", wordBreak: "break-all" },
   footer: { position: "fixed", bottom: 10, opacity: 0.6, fontSize: 12 },
 };
