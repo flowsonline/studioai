@@ -4,22 +4,14 @@ import { setCors } from "../../lib/cors";
 import { getReplicateStatus } from "../../lib/replicate";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // CORS + preflight
-  if (setCors(req, res)) return;
+  setCors(res);
 
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method Not Allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  const jobId = String(req.query.jobId || "").trim();
-  if (!jobId) {
-    return res.status(400).json({ error: "Missing jobId" });
-  }
+  const id = (req.query.id as string) || "";
+  if (!id) return res.status(400).json({ status: "failed", error: "missing id" });
 
-  try {
-    const status = await getReplicateStatus(jobId);
-    return res.status(200).json(status);
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message || "Status check failed" });
-  }
+  const status = await getReplicateStatus(id);
+  res.status(200).json(status);
 }
