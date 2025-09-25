@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 /**
  * Orion Social Media Studio — MVP (Replicate wired)
  * Steps:
- *  1) Post Description (chat bar)
- *  2) Brand Info (name + website)  [optional]
- *  3) Media choice (Upload or “AI will create for me”)  [UI only for now]
- *  4) Industry + Goal
- *  5) Tone / Style (gallery)
- *  6) Formats (multi-select) + Video/Photo toggle
- *  7) Voice / Music toggles
- *  8) Copy (draft script + caption + hashtags)  [simple client draft]
- *  9) Render & Preview (polls /api/status) in phone shell + inline copy
+ *   1) Post Description (chat bar)
+ *   2) Brand Info (name + website)  [optional]
+ *   3) Media choice (Upload or “AI will create for me”)
+ *   4) Industry + Goal
+ *   5) Tone / Style (gallery)
+ *   6) Formats (multi-select) + Video/Photo toggle
+ *   7) Voice / Music (optional)
+ *   8) Copy (draft script + caption + hashtags)
+ *   9) Render & Preview (polls /api/status) in phone shell + inline copy
  */
 
 const GOALS = ["Launch", "Promo", "Traffic", "Awareness"] as const;
@@ -34,7 +35,12 @@ const TONES = [
   { id: "Professional", img: "/tone/professional.png" },
 ] as const;
 
-type FormatId = "Reel (9:16)" | "Story (9:16)" | "Square (1:1)" | "Wide (16:9)" | "Carousel (Photos)";
+type FormatId =
+  | "Reel (9:16)"
+  | "Story (9:16)"
+  | "Square (1:1)"
+  | "Wide (16:9)"
+  | "Carousel (Photos)";
 const ALL_FORMATS: FormatId[] = [
   "Reel (9:16)",
   "Story (9:16)",
@@ -52,28 +58,31 @@ type Status = {
 export default function Home() {
   const [step, setStep] = useState(1);
 
-  // Chat + small feedback
-  const [orionLine, setOrionLine] = useState("Hi, I’m Orion. What are you posting today?");
+  // Chat + small replies
+  const [orionLine, setOrionLine] = useState(
+    "Hi, I’m Orion. What are you posting today?"
+  );
   const [chatInput, setChatInput] = useState("");
   const [miniReply, setMiniReply] = useState<string | null>(null);
 
-  // Collected fields
+  // Collected inputs
   const [postDesc, setPostDesc] = useState("");
   const [brandName, setBrandName] = useState("");
   const [website, setWebsite] = useState("");
   const [useAiMedia, setUseAiMedia] = useState<"ai" | "upload">("ai");
 
-  const [industry, setIndustry] = useState<(typeof INDUSTRIES)[number]>("Digital Marketing");
+  const [industry, setIndustry] =
+    useState<(typeof INDUSTRIES)[number]>("Digital Marketing");
   const [goal, setGoal] = useState<(typeof GOALS)[number]>("Traffic");
 
   const [tone, setTone] = useState<(typeof TONES)[number]["id"]>("Cinematic");
   const [formats, setFormats] = useState<FormatId[]>(["Reel (9:16)"]);
-  const [videoOrPhoto, setVideoOrPhoto] = useState<"video" | "photo">("video"); // for Reel/Story/Square
+  const [videoOrPhoto, setVideoOrPhoto] = useState<"video" | "photo">("video");
 
   const [voiceOn, setVoiceOn] = useState(true);
   const [musicOn, setMusicOn] = useState(true);
 
-  // Copy (client-drafted MVP; can swap to OpenAI later)
+  // Copy
   const [script, setScript] = useState("");
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState<string>("");
@@ -84,35 +93,29 @@ export default function Home() {
   const [rendering, setRendering] = useState(false);
   const pollRef = useRef<any>(null);
 
-  // Phone orientation based on formats
+  // Phone orientation
   const phoneOrientation: "vertical" | "horizontal" | "square" = useMemo(() => {
     if (formats.includes("Wide (16:9)")) return "horizontal";
     if (formats.includes("Square (1:1)")) return "square";
     return "vertical";
   }, [formats]);
 
-  // Typewriter effect
+  /** Typewriter header line per step */
   useEffect(() => {
-    let i = 0;
-    const base =
-      step === 1
-        ? "Hi, I’m Orion. What are you posting today?"
-        : step === 2
-        ? "Got it. Add your brand name and website (optional)."
-        : step === 3
-        ? "Do you want to upload media, or should I create it for you?"
-        : step === 4
-        ? "Select your industry and goal."
-        : step === 5
-        ? "Pick a tone / style."
-        : step === 6
-        ? "Choose your format(s)."
-        : step === 7
-        ? "Voiceover and music — on or off?"
-        : step === 8
-        ? "Here’s your draft script + caption. Tweak anything, then render."
-        : "Rendering your preview…";
+    const lines: Record<number, string> = {
+      1: "Hi, I’m Orion. What are you posting today?",
+      2: "Got it. Add your brand name and website (optional).",
+      3: "Do you want to upload media, or should I create it for you?",
+      4: "Select your industry and goal.",
+      5: "Pick a tone / style.",
+      6: "Choose your format(s).",
+      7: "Voiceover and music — on or off?",
+      8: "Here’s your draft script + caption. Tweak anything, then render.",
+      9: "Rendering your preview…",
+    };
+    const base = lines[step] || lines[1];
     setOrionLine("|");
+    let i = 0;
     const iv = setInterval(() => {
       i++;
       setOrionLine(base.slice(0, i) + " |");
@@ -121,7 +124,7 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [step]);
 
-  // Polling for status
+  /** Poll /api/status until success/fail */
   useEffect(() => {
     if (!jobId) return;
     if (pollRef.current) clearInterval(pollRef.current);
@@ -135,43 +138,102 @@ export default function Home() {
           setRendering(false);
         }
       } catch {
-        // ignore; keep polling softly
+        /* keep polling */
       }
     }, 900);
     return () => clearInterval(pollRef.current);
   }, [jobId]);
 
-  // Helpers
+  function pushMiniReply(text: string) {
+    setMiniReply(text);
+    setTimeout(() => setMiniReply(null), 1800);
+  }
+
   function selectFormat(f: FormatId) {
     setFormats((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   }
-  function pushMiniReply(text: string) {
-    setMiniReply(text);
-    setTimeout(() => setMiniReply(null), 2000);
-  }
+
+  /** Chat bar continue handler for step 1–2 */
   function continueFromChat() {
     const txt = chatInput.trim();
     if (!txt) return;
+
     if (step === 1) {
       setPostDesc(txt);
+      setChatInput("");
       pushMiniReply("Nice—moving on.");
       setStep(2);
-    } else if (step === 2) {
+      return;
+    }
+    if (step === 2) {
       if (!brandName) {
         setBrandName(txt);
+        setChatInput("");
         pushMiniReply("Saved. Now paste your website (or type 'skip').");
-      } else if (!website) {
+        return;
+      }
+      if (!website) {
         if (txt.toLowerCase() !== "skip") setWebsite(txt);
+        setChatInput("");
         pushMiniReply("Thanks. Next → Media.");
         setStep(3);
+        return;
       }
     }
-    setChatInput("");
   }
+
   function autoAdvance<T>(setter: (v: T) => void, value: T, nextStep: number) {
     setter(value as any);
     setTimeout(() => setStep(nextStep), 180);
   }
+
+  function buildPrompt() {
+    const pieces = [
+      postDesc,
+      brandName && `Brand: ${brandName}`,
+      website && `Website: ${website}`,
+      `Industry: ${industry}`,
+      `Goal: ${goal}`,
+      `Tone: ${tone}`,
+      `Formats: ${formats.join(", ")}`,
+      videoOrPhoto === "photo" ? "Static image ad." : "Short video ad with captions and transitions.",
+      voiceOn ? "Include voiceover." : "No voiceover.",
+      musicOn ? "Add upbeat background music." : "No music.",
+      "Clean, modern, high-contrast. Social-media ready.",
+    ].filter(Boolean);
+    return pieces.join(" | ");
+  }
+
+  function ctaForGoal(g: (typeof GOALS)[number]) {
+    switch (g) {
+      case "Launch":
+        return "Tap to learn more!";
+      case "Promo":
+        return "Shop now!";
+      case "Traffic":
+        return "Visit our site!";
+      case "Awareness":
+      default:
+        return "Follow for updates!";
+    }
+  }
+
+  function hashForIndustry(
+    ind: (typeof INDUSTRIES)[number],
+    g: (typeof GOALS)[number],
+    t: (typeof TONES)[number]["id"]
+  ) {
+    const base = [
+      "#socialmedia",
+      "#marketing",
+      "#ad",
+      `#${ind.replace(/\s+/g, "")}`,
+      `#${g.toLowerCase()}`,
+      `#${t.toLowerCase()}`,
+    ];
+    return base.join(" ");
+  }
+
   function draftCopy() {
     const base = `${tone} ${goal.toLowerCase()} ${videoOrPhoto} for ${
       brandName || "your brand"
@@ -181,17 +243,21 @@ export default function Home() {
         ? `Hook (0-2s): ${brandName || "Your brand"}\nBody (3-10s): ${postDesc}\nCTA (last 2s): ${ctaForGoal(
             goal
           )}`
-        : `Headline: ${postDesc}\nSub: ${goal} with ${brandName || "our brand"}\nCTA: ${ctaForGoal(goal)}`;
+        : `Headline: ${postDesc}\nSub: ${goal} with ${brandName || "our brand"}\nCTA: ${ctaForGoal(
+            goal
+          )}`;
     setScript(s);
     setCaption(`${base} ${postDesc}. ${ctaForGoal(goal)}`);
     setHashtags(hashForIndustry(industry, goal, tone));
   }
+
   async function startRender() {
     try {
       setRendering(true);
       setRender(null);
       setJobId(null);
 
+      // choose a single primary format to drive aspect
       const primary = formats[0] || "Reel (9:16)";
       const res = await fetch("/api/render", {
         method: "POST",
@@ -217,33 +283,18 @@ export default function Home() {
       setStep(9);
     }
   }
-  function buildPrompt() {
-    const pieces = [
-      postDesc,
-      brandName && `Brand: ${brandName}`,
-      website && `Website: ${website}`,
-      `Industry: ${industry}`,
-      `Goal: ${goal}`,
-      `Tone: ${tone}`,
-      `Formats: ${formats.join(", ")}`,
-      videoOrPhoto === "photo" ? "Static image ad." : "Short video ad with captions and transitions.",
-      voiceOn ? "Include voiceover." : "No voiceover.",
-      musicOn ? "Add upbeat background music." : "No music.",
-      "Make it clean, modern, high-contrast. Social-media ready.",
-    ].filter(Boolean);
-    return pieces.join(" | ");
-  }
 
-  // UI
   return (
     <div style={S.page}>
       <div style={S.center}>
         <div style={S.monitor}>
+          {/* Orion header */}
           <div style={S.orionLine}>
             <span style={S.orionName}>ORION:</span> <span>{orionLine}</span>
           </div>
 
-          {/* Steps */}
+          {/* -- Steps -- */}
+
           {step === 1 && (
             <Card>
               <p style={S.sub}>I’ll design your ad from a short description.</p>
@@ -257,7 +308,9 @@ export default function Home() {
                 <span />
                 <button
                   style={S.primary}
-                  onClick={() => (postDesc ? setStep(2) : pushMiniReply("Type a description first"))}
+                  onClick={() =>
+                    postDesc ? setStep(2) : pushMiniReply("Type a description first")
+                  }
                 >
                   Continue
                 </button>
@@ -267,7 +320,9 @@ export default function Home() {
 
           {step === 2 && (
             <Card>
-              <p style={S.sub}>Brand info (optional). Use the chat to enter first your brand name, then website.</p>
+              <p style={S.sub}>
+                Brand info (optional). Use the chat to enter first your brand name, then website.
+              </p>
               <div style={S.kv}>
                 <div>
                   <strong>Brand:</strong> {brandName || <em>—</em>}
@@ -356,7 +411,13 @@ export default function Home() {
               <p style={S.sub}>Tone / Style</p>
               <div style={S.gallery}>
                 {TONES.map((t) => (
-                  <ToneCard key={t.id} label={t.id} img={t.img} active={tone === t.id} onClick={() => setTone(t.id)} />
+                  <ToneCard
+                    key={t.id}
+                    label={t.id}
+                    img={t.img}
+                    active={tone === t.id}
+                    onClick={() => setTone(t.id)}
+                  />
                 ))}
               </div>
               <div style={S.footerRow}>
@@ -402,7 +463,13 @@ export default function Home() {
                 <button style={S.linkBtn} onClick={() => setStep(5)}>
                   Back
                 </button>
-                <button style={S.primary} onClick={() => setStep(7)}>
+                <button
+                  style={S.primary}
+                  onClick={() => {
+                    draftCopy();
+                    setStep(7);
+                  }}
+                >
                   Continue
                 </button>
               </div>
@@ -411,14 +478,10 @@ export default function Home() {
 
           {step === 7 && (
             <Card>
-              <p style={S.sub}>Voice / Music</p>
-              <div style={S.row}>
-                <label style={S.toggle}>
-                  <input type="checkbox" checked={voiceOn} onChange={(e) => setVoiceOn(e.target.checked)} /> Voiceover
-                </label>
-                <label style={S.toggle}>
-                  <input type="checkbox" checked={musicOn} onChange={(e) => setMusicOn(e.target.checked)} /> Music
-                </label>
+              <p style={S.sub}>Voice & Music</p>
+              <div style={S.rowWrap}>
+                <Toggle label="Voice" checked={voiceOn} onChange={setVoiceOn} />
+                <Toggle label="Music" checked={musicOn} onChange={setMusicOn} />
               </div>
               <div style={S.footerRow}>
                 <button style={S.linkBtn} onClick={() => setStep(6)}>
@@ -439,22 +502,19 @@ export default function Home() {
 
           {step === 8 && (
             <Card>
-              <p style={S.sub}>Copy — edit anything, then Render</p>
+              <p style={S.sub}>Copy (you can edit)</p>
               <label style={S.label}>Script</label>
-              <textarea style={S.textarea} value={script} onChange={(e) => setScript(e.target.value)} />
-
+              <textarea style={S.textarea} rows={5} value={script} onChange={(e) => setScript(e.target.value)} />
               <label style={S.label}>Caption</label>
-              <textarea style={S.textarea} value={caption} onChange={(e) => setCaption(e.target.value)} />
-
+              <textarea style={S.textarea} rows={3} value={caption} onChange={(e) => setCaption(e.target.value)} />
               <label style={S.label}>Hashtags</label>
-              <input style={S.input} value={hashtags} onChange={(e) => setHashtags(e.target.value)} />
-
+              <textarea style={S.textarea} rows={2} value={hashtags} onChange={(e) => setHashtags(e.target.value)} />
               <div style={S.footerRow}>
                 <button style={S.linkBtn} onClick={() => setStep(7)}>
                   Back
                 </button>
                 <button style={S.primary} onClick={startRender} disabled={rendering}>
-                  {rendering ? "Rendering…" : "Render"}
+                  {rendering ? "Starting…" : "Generate"}
                 </button>
               </div>
             </Card>
@@ -463,41 +523,68 @@ export default function Home() {
           {step === 9 && (
             <Card>
               <p style={S.sub}>Preview</p>
-              <PhonePreview orientation={phoneOrientation} url={render?.url || undefined} />
-              <div style={{ marginTop: 10 }}>
-                <strong>Status:</strong>{" "}
-                {render?.status ?? (rendering ? "starting…" : "—")} {render?.error ? `— ${render.error}` : ""}
+              <div style={S.previewWrap}>
+                <PhoneShell orientation={phoneOrientation}>
+                  {render?.status === "succeeded" && render?.url ? (
+                    <video
+                      key={render.url}
+                      src={render.url}
+                      controls
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 14 }}
+                    />
+                  ) : (
+                    <div style={S.centerMsg}>
+                      {rendering || render?.status === "starting" || render?.status === "processing"
+                        ? "Rendering…"
+                        : render?.status === "failed"
+                        ? `Failed: ${render?.error || "Unknown error"}`
+                        : "Waiting…"}
+                    </div>
+                  )}
+                </PhoneShell>
+                <div style={S.copyCol}>
+                  <h4 style={{ margin: "0 0 8px 0" }}>Post copy</h4>
+                  <div style={S.copyBox}>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{script}</div>
+                    <hr style={{ border: 0, borderTop: "1px solid rgba(255,255,255,.08)", margin: "8px 0" }} />
+                    <div>{caption}</div>
+                    <div style={{ opacity: 0.8, marginTop: 6 }}>{hashtags}</div>
+                  </div>
+                </div>
               </div>
               <div style={S.footerRow}>
                 <button style={S.linkBtn} onClick={() => setStep(8)}>
                   Back
                 </button>
                 <a
-                  style={{ ...S.primary, textDecoration: "none", display: "inline-block" }}
                   href={render?.url || "#"}
                   target="_blank"
                   rel="noreferrer"
+                  style={{ ...S.primary, pointerEvents: render?.url ? "auto" : "none", opacity: render?.url ? 1 : 0.6 }}
                 >
-                  Open Video
+                  {render?.url ? "Open in new tab" : "Rendering…"}
                 </a>
-              </div>
-              <div style={S.upgrade}>
-                Want more variations + scheduling & analytics? <a href="#" style={S.link}>Upgrade to FLOWS Pro</a>
               </div>
             </Card>
           )}
 
-          {/* mini reply strip */}
-          {miniReply && <div style={S.mini}>{miniReply}</div>}
+          {/* Mini reply */}
+          {miniReply && <div style={S.miniReply}>{miniReply}</div>}
         </div>
       </div>
+
+      <footer style={S.footer}>© Orion Studio — MVP</footer>
     </div>
   );
 }
 
-/* ========== Small components ========== */
+/* ------------ UI bits ------------ */
 
-function Card({ children }: { children: any }) {
+function Card({ children }: { children: React.ReactNode }) {
   return <div style={S.card}>{children}</div>;
 }
 
@@ -512,21 +599,38 @@ function ChatBar({
   onSend: () => void;
   placeholder?: string;
 }) {
+  function handleKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") onSend();
+  }
   return (
-    <div style={S.chatBar}>
+    <div style={S.chat}>
       <input
         style={S.chatInput}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder || "Type here…"}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSend();
-        }}
+        placeholder={placeholder}
+        onKeyDown={handleKey}
       />
-      <button style={S.sendBtn} onClick={onSend}>
+      <button style={S.primary} onClick={onSend}>
         Send
       </button>
     </div>
+  );
+}
+
+function Chip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button onClick={onClick} style={{ ...S.chip, ...(active ? S.chipActive : null) }}>
+      {label}
+    </button>
   );
 }
 
@@ -540,22 +644,26 @@ function Choice({
   onClick?: () => void;
 }) {
   return (
-    <button onClick={onClick} style={{ ...S.choice, ...(active ? S.choiceActive : {}) }}>
+    <button onClick={onClick} style={{ ...S.choice, ...(active ? S.choiceActive : null) }}>
       {label}
     </button>
   );
 }
 
-function Chip({
+function Toggle({
   label,
-  active,
-  onClick,
+  checked,
+  onChange,
 }: {
   label: string;
-  active?: boolean;
-  onClick?: () => void;
+  checked: boolean;
+  onChange: (v: boolean) => void;
 }) {
-  return <button onClick={onClick} style={{ ...S.chip, ...(active ? S.chipActive : {}) }}>{label}</button>;
+  return (
+    <label style={S.toggle}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {label}
+    </label>
+  );
 }
 
 function ToneCard({
@@ -567,48 +675,46 @@ function ToneCard({
   label: string;
   img: string;
   active?: boolean;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
   return (
-    <div onClick={onClick} style={{ ...S.toneCard, ...(active ? S.toneCardActive : {}) }}>
-      <div style={S.toneImgWrap}>
-        {/* If the image is missing, the background still shows a gradient */}
-        <img src={img} onError={(e)=>{ (e.currentTarget as any).style.display='none'; }} style={S.toneImg} />
-      </div>
-      <div style={S.toneLabel}>{label}</div>
+    <div
+      onClick={onClick}
+      style={{
+        ...S.toneCard,
+        ...(active ? S.toneCardActive : null),
+        backgroundImage: `url(${img})`,
+      }}
+      title={label}
+      role="button"
+    >
+      <div style={S.toneBadge}>{label}</div>
     </div>
   );
 }
 
-function PhonePreview({ orientation, url }: { orientation: "vertical" | "horizontal" | "square"; url?: string }) {
-  const shell: any = { position: "relative", width: 340, height: 680 };
-  const videoStyle: any = {
-    position: "absolute",
-    left: 30 + 8,
-    top: 70 + 8,
-    width: 280 - 16,
-    height: 540 - 16,
-    objectFit: "cover",
-    background: "#0b0f14",
-    borderRadius: 8,
-  };
-  if (orientation === "horizontal") videoStyle.objectFit = "contain";
-  if (orientation === "square") videoStyle.objectFit = "contain";
+function PhoneShell({
+  children,
+  orientation,
+}: {
+  children: React.ReactNode;
+  orientation: "vertical" | "horizontal" | "square";
+}) {
+  const dims =
+    orientation === "horizontal"
+      ? { width: 520, height: 300 }
+      : orientation === "square"
+      ? { width: 340, height: 340 }
+      : { width: 300, height: 520 };
   return (
-    <div style={shell}>
-      <img src="/phone-shell.svg" style={{ width: "100%", height: "100%" }} />
-      {url ? (
-        <video src={url} autoPlay muted controls style={videoStyle} />
-      ) : (
-        <div style={{ ...videoStyle, display: "grid", placeItems: "center", color: "#9aa4b2" }}>Waiting…</div>
-      )}
+    <div style={{ ...S.phone, ...dims }}>
+      <div style={S.phoneInner}>{children}</div>
     </div>
   );
 }
 
 /* ========= Styles ========= */
-
-const S: Record<string, React.CSSProperties> = {
+const S: Record<string, CSSProperties> = {
   page: {
     minHeight: "100svh",
     background:
@@ -616,7 +722,6 @@ const S: Record<string, React.CSSProperties> = {
     color: "#e8eefc",
   },
   center: { display: "grid", placeItems: "center", padding: "40px 16px" },
-
   monitor: {
     width: "100%",
     maxWidth: 980,
@@ -628,336 +733,182 @@ const S: Record<string, React.CSSProperties> = {
     backdropFilter: "blur(8px)",
     position: "relative",
   },
-
   orionLine: {
     fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     fontSize: 20,
     marginBottom: 8,
     letterSpacing: 0.2,
   },
   orionName: { color: "#7aa2ff", fontWeight: 700 },
-
-  sub: {
-    opacity: 0.9,
-    margin: "0 0 12px 0",
-    fontSize: 15,
-    lineHeight: 1.5,
+  card: {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 14,
+    padding: 16,
+    marginTop: 10,
   },
-
-  kv: {
-    display: "grid",
-    gridTemplateColumns: "1fr",
-    gap: 8,
-    marginBottom: 12,
-    opacity: 0.95,
+  sub: { opacity: 0.9, margin: "2px 0 12px" },
+  chat: { display: "flex", gap: 8, alignItems: "center" },
+  chatInput: {
+    flex: 1,
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: "#e8eefc",
   },
-
-  rowWrap: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 10,
-    margin: "8px 0 6px",
-  },
-  row: { display: "flex", alignItems: "center", gap: 16, marginTop: 10 },
-
-  footerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 14,
-  },
-
   primary: {
-    background:
-      "linear-gradient(180deg, rgba(135,179,255,0.7) 0%, rgba(88,138,255,0.7) 100%)",
-    color: "#071020",
-    fontWeight: 700,
-    border: "1px solid rgba(122,162,255,0.35)",
+    background: "linear-gradient(135deg, #7aa2ff 0%, #6ba3ff 100%)",
+    color: "#030611",
+    border: "none",
     borderRadius: 12,
     padding: "10px 16px",
+    fontWeight: 700,
     cursor: "pointer",
   },
   linkBtn: {
     background: "transparent",
-    color: "#7aa2ff",
     border: "none",
+    color: "#a6bafc",
     cursor: "pointer",
-    padding: "8px 6px",
   },
-
-  label: { fontSize: 12, opacity: 0.7, marginBottom: 6 },
-
+  footerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 12,
+  },
+  kv: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 8,
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  label: { display: "block", margin: "8px 0 6px", opacity: 0.9 },
+  row: { display: "flex", alignItems: "center", gap: 16, marginTop: 8 },
+  rowWrap: { display: "flex", flexWrap: "wrap", gap: 10 },
+  chip: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.05)",
+    color: "#e8eefc",
+    cursor: "pointer",
+  },
+  chipActive: {
+    background: "rgba(122,162,255,0.2)",
+    borderColor: "rgba(122,162,255,0.6)",
+  },
+  choice: {
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.04)",
+    cursor: "pointer",
+  },
+  choiceActive: {
+    outline: "2px solid rgba(122,162,255,0.5)",
+    background: "rgba(122,162,255,0.14)",
+  },
+  toggle: {
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.05)",
+    padding: "10px 14px",
+    borderRadius: 12,
+    cursor: "pointer",
+  },
+  textarea: {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    padding: 10,
+    color: "#e8eefc",
+  },
   gallery: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))",
     gap: 12,
   },
   toneCard: {
-    border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    overflow: "hidden",
-    cursor: "pointer",
     position: "relative",
-    background: "rgba(255,255,255,0.02)",
+    height: 140,
+    backgroundPosition: "center",
+    backgroundSize: "cover",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.09)",
+    cursor: "pointer",
+    overflow: "hidden",
   },
-  toneImg: { width: "100%", height: 120, objectFit: "cover", display: "block" },
-  toneLabel: {
+  toneCardActive: {
+    outline: "2px solid rgba(122,162,255,0.6)",
+    boxShadow: "0 0 0 4px rgba(122,162,255,0.15) inset",
+  },
+  toneBadge: {
     position: "absolute",
     left: 10,
     bottom: 10,
     background: "rgba(0,0,0,0.45)",
-    padding: "4px 8px",
+    border: "1px solid rgba(255,255,255,0.18)",
     borderRadius: 999,
-    fontSize: 12,
-  },
-
-  chip: {
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-    padding: "8px 12px",
-    borderRadius: 999,
-    fontSize: 13,
-    cursor: "pointer",
-  },
-  chipActive: {
-    background:
-      "linear-gradient(180deg, rgba(122,162,255,0.35) 0%, rgba(88,138,255,0.35) 100%)",
-    color: "#071020",
-    border: "1px solid rgba(122,162,255,0.6)",
+    padding: "6px 10px",
     fontWeight: 700,
   },
-
-  choice: {
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-    padding: 14,
-    borderRadius: 12,
-    cursor: "pointer",
-    minWidth: 220,
-    textAlign: "center",
-  },
-
-  chatWrap: {
+  previewWrap: {
     display: "grid",
-    gridTemplateColumns: "1fr auto",
-    gap: 8,
-    alignItems: "center",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 16,
+    alignItems: "flex-start",
   },
-
-  phoneShell: {
-    width: 330,
-    height: 660,
-    background: "linear-gradient(180deg, #0e1323 0%, #0a0f1b 100%)",
-    borderRadius: 36,
+  phone: {
+    borderRadius: 22,
+    padding: 16,
+    background:
+      "linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))",
+    border: "1px solid rgba(255,255,255,0.12)",
+    display: "grid",
+    placeItems: "center",
+  },
+  phoneInner: {
+    width: "100%",
+    height: "100%",
+    background: "black",
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  copyCol: { minWidth: 0 },
+  copyBox: {
+    background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.06)",
-    boxShadow: "0 20px 80px rgba(0,0,0,0.45)",
-    padding: 14,
-    position: "relative",
-    overflow: "hidden",
+    borderRadius: 12,
+    padding: 10,
   },
-  phoneScreen: {
+  centerMsg: {
+    display: "grid",
+    placeItems: "center",
+    color: "#c8d3ff",
     width: "100%",
     height: "100%",
-    borderRadius: 26,
-    overflow: "hidden",
-    background: "#000",
-    display: "grid",
-    placeItems: "center",
   },
-  phoneScreenHorizontal: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 26,
-    overflow: "hidden",
-    background: "#000",
-    display: "grid",
-    placeItems: "center",
-  },
-  phoneScreenSquare: {
-    width: "100%",
-    aspectRatio: "1 / 1",
-    borderRadius: 26,
-    overflow: "hidden",
-    background: "#000",
-    display: "grid",
-    placeItems: "center",
-  },
-  video: { width: "100%", height: "100%", objectFit: "cover" },
-
-  error: {
-    marginTop: 12,
-    padding: "10px 12px",
+  miniReply: {
+    position: "absolute",
+    right: 16,
+    top: 12,
+    background: "rgba(0,0,0,0.45)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    padding: "6px 10px",
     borderRadius: 10,
-    border: "1px solid rgba(240,120,120,0.4)",
-    background: "rgba(240,80,80,0.08)",
-    color: "#ffd6d6",
-    fontSize: 13,
+    fontSize: 12,
   },
-
-  statusBox: {
-    marginTop: 12,
-    padding: "8px 10px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-    fontSize: 13,
+  footer: {
+    opacity: 0.6,
+    textAlign: "center",
+    padding: "12px 10px 24px",
+    fontSize: 12,
   },
-
-  resultBox: {
-    display: "grid",
-    gridTemplateColumns: "1fr",
-    gap: 12,
-    marginTop: 14,
-  },
-  resultTitle: { fontWeight: 700, marginBottom: 6 },
-  resultHint: { opacity: 0.8, fontSize: 13 },
 };
-
-/* ========= Small UI helpers ========= */
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: "rgba(0,0,0,0.25)",
-        border: "1px solid rgba(255,255,255,0.06)",
-        borderRadius: 14,
-        padding: 14,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Chip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{ ...S.chip, ...(active ? S.chipActive : null) }}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ToneCard({
-  label,
-  img,
-  active,
-  onClick,
-}: {
-  label: string;
-  img: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        ...S.toneCard,
-        outline: active ? "2px solid #7aa2ff" : "none",
-      }}
-    >
-      {/* You can replace with <Image /> if you use next/image and copy files to /public */}
-      <img src={img} alt={label} style={S.toneImg} />
-      <div style={S.toneLabel}>{label}</div>
-    </div>
-  );
-}
-
-function Choice({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        ...S.choice,
-        outline: active ? "2px solid #7aa2ff" : "none",
-      }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function ChatBar({
-  value,
-  onChange,
-  onSend,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSend: () => void;
-  placeholder?: string;
-}) {
-  return (
-    <div style={S.chatWrap}>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSend();
-        }}
-        style={{
-          width: "100%",
-          background: "rgba(255,255,255,0.04)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: 12,
-          padding: "12px 14px",
-          color: "#e8eefc",
-        }}
-      />
-      <button style={S.primary} onClick={onSend}>
-        Send
-      </button>
-    </div>
-  );
-}
-
-function PhoneShell({
-  url,
-  orientation,
-}: {
-  url?: string | null;
-  orientation: "vertical" | "horizontal" | "square";
-}) {
-  const screenStyle =
-    orientation === "horizontal"
-      ? S.phoneScreenHorizontal
-      : orientation === "square"
-      ? S.phoneScreenSquare
-      : S.phoneScreen;
-
-  return (
-    <div style={S.phoneShell}>
-      <div style={screenStyle}>
-        {url ? (
-          <video src={url} style={S.video} controls autoPlay loop />
-        ) : (
-          <div style={{ opacity: 0.6, fontSize: 13 }}>Waiting for preview…</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
